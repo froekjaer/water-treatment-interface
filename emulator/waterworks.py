@@ -112,6 +112,27 @@ class Waterworks:
         self._treatment_buffer: list[float] = []  # delay line for treatment
         self._frozen: dict[str, float] = {}       # sensor -> frozen value
 
+        # External control: when True, the pump follows set_pump_command()
+        # (used by the PLC layer) instead of the built-in hysteresis.
+        self.external_control = False
+        self._pump_command = False
+
+    # -- external control interface (used by the PLC layer) -------------------
+
+    def set_pump_command(self, on: bool) -> None:
+        """Command the borehole pump on/off. Only honoured when
+        external_control is True. The physics still applies ramp-up,
+        and a pump_failure fault overrides any command."""
+        self._pump_command = bool(on)
+
+    def inject_fault(self, kind: str, start_minute: int, duration_minutes: int,
+                     leak_rate_m3h: float = 3.0, sensor: str = "tank_level") -> None:
+        """Inject a fault scenario at runtime (e.g. from the HMI)."""
+        self.faults.append(FaultScenario(
+            kind=kind, start_minute=start_minute, duration_minutes=duration_minutes,
+            leak_rate_m3h=leak_rate_m3h, sensor=sensor,
+        ))
+
     # -- internal helpers -----------------------------------------------------
 
     def _fault_active(self, kind: str, minute: int) -> bool:
@@ -139,19 +160,36 @@ class Waterworks:
         return max(0.0, flow)
 
     def _update_pump(self, minute: int) -> None:
-        """Hysteresis control of the borehole pump."""
+        """Pump state update.
+
+        Two modes:
+        - external_control=True: the pump follows the PLC's command
+          (a pump_failure fault still forces it off — physics wins).
+        - external_control=False: built-in hysteresis on tower level.
+        """
         if self._fault_active("pump_failure", minute):
             if self.pump_on:
                 self.pump_on = False
                 self.pump_minutes_running = 0
             return
-        if not self.pump_on and self.tank_m3 < self.cfg.pump_start_level_m3:
+
+        if self.external_control:
+            want = self._pump_command
+        else:
+            if not self.pump_on and self.tank_m3 < self.cfg.pump_start_level_m3:
+                want = True
+            elif self.pump_on and self.tank_m3 > self.cfg.pump_stop_level_m3:
+                want = False
+            else:
+                want = self.pump_on
+
+        if want and not self.pump_on:
             self.pump_on = True
             self.pump_minutes_running = 0
             self.pump_cycles_today += 1
             # sediment stirred up at pump start -> turbidity spike
             self._turbidity_spike_remaining += self.cfg.turbidity_pumpstart_spike_ntu
-        elif self.pump_on and self.tank_m3 > self.cfg.pump_stop_level_m3:
+        elif not want and self.pump_on:
             self.pump_on = False
             self.pump_minutes_running = 0
 

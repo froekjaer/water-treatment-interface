@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waterworks HMI</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #2d333b;
+    --text: #e6edf3; --dim: #8b949e; --accent: #39c5cf;
+    --ok: #3fb950; --warn: #d29922; --crit: #f85149; --pump: #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  header h1 { font-size: 17px; font-weight: 600; letter-spacing: .5px; }
+  header h1 span { color: var(--accent); }
+  .clock { font-family: ui-monospace, monospace; color: var(--dim); }
+  .speed { margin-left: auto; display: flex; gap: 6px; align-items: center; color: var(--dim); font-size: 12px; }
+  .speed button { background: var(--panel); color: var(--dim); border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+  .speed button.on { color: var(--accent); border-color: var(--accent); }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 14px; padding: 14px 20px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-bottom: 12px; }
+
+  /* Process gauges */
+  .gauges { display: grid; grid-template-columns: 90px 1fr; gap: 18px; }
+  .tank { position: relative; height: 220px; background: #0a0e14; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .tank .water { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(180deg, #1f6feb, #0c2d6b); transition: height .6s; }
+  .tank .lvl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 700 20px ui-monospace, monospace; text-shadow: 0 1px 3px #000; }
+  .tank .mark { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(255,255,255,.35); font-size: 9px; color: rgba(255,255,255,.5); padding-left: 3px; }
+  .vals { display: grid; gap: 10px; align-content: start; }
+  .val { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .val .k { color: var(--dim); font-size: 12px; }
+  .val .v { font: 600 18px ui-monospace, monospace; }
+  .val .u { font-size: 11px; color: var(--dim); margin-left: 4px; }
+
+  /* Pump */
+  .pump { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .dot { width: 16px; height: 16px; border-radius: 50%; background: var(--dim); box-shadow: 0 0 8px currentColor; }
+  .dot.run { background: var(--ok); color: var(--ok); }
+  .dot.stop { background: var(--dim); color: transparent; }
+  .dot.fault { background: var(--crit); color: var(--crit); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .pump .lbl { font-weight: 600; }
+  .mode-btns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .btn { background: #21262d; color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 7px 14px; cursor: pointer; font-size: 13px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.on { background: var(--accent); color: #04262a; font-weight: 600; border-color: var(--accent); }
+  .btn.warn { border-color: var(--warn); color: var(--warn); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Alarms */
+  #alarms { grid-column: 1 / -1; }
+  .alarm { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; margin-bottom: 6px; font-size: 13px; }
+  .alarm.critical { background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.4); }
+  .alarm.warning { background: rgba(210,153,34,.10); border: 1px solid rgba(210,153,34,.35); }
+  .alarm.acked { opacity: .55; }
+  .alarm .sev { font: 700 10px ui-monospace, monospace; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; }
+  .alarm.critical .sev { background: var(--crit); color: #fff; }
+  .alarm.warning .sev { background: var(--warn); color: #1d1503; }
+  .alarm .ack { margin-left: auto; }
+  .no-alarms { color: var(--ok); font-size: 13px; }
+
+  /* Trend */
+  #trend-wrap { grid-column: 1 / -1; }
+  canvas { width: 100%; height: 260px; display: block; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--dim); margin-top: 8px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; }
+
+  /* Setpoints + faults + registers */
+  .setrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+  .setrow label { flex: 1; color: var(--dim); }
+  .setrow input { width: 80px; background: #0a0e14; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; font-family: ui-monospace, monospace; }
+  .faultbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; color: var(--dim); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font: 11px ui-monospace, monospace; margin-top: 8px; }
+  td, th { border: 1px solid var(--border); padding: 3px 7px; text-align: left; }
+  th { color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>💧 WATERWORKS <span>HMI</span></h1>
+  <div class="clock" id="clock">—</div>
+  <div class="speed">
+    Sim speed:
+    <button data-speed="1">1×</button>
+    <button data-speed="5" class="on">5×</button>
+    <button data-speed="30">30×</button>
+    <button data-speed="60">60×</button>
+    <button data-speed="360">360×</button>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Process</h2>
+    <div class="gauges">
+      <div class="tank">
+        <div class="water" id="water" style="height:60%"></div>
+        <div class="mark" id="markStart">start</div>
+        <div class="mark" id="markStop">stop</div>
+        <div class="lvl" id="lvlPct">—</div>
+      </div>
+      <div class="vals">
+        <div class="val"><span class="k">Tower level</span><span><span class="v" id="vLvl">—</span><span class="u">m³</span></span></div>
+        <div class="val"><span class="k">Network pressure</span><span><span class="v" id="vPres">—</span><span class="u">bar</span></span></div>
+        <div class="val"><span class="k">Demand (outflow)</span><span><span class="v" id="vFlow">—</span><span class="u">m³/h</span></span></div>
+        <div class="val"><span class="k">Pump flow</span><span><span class="v" id="vPumpFlow">—</span><span class="u">m³/h</span></span></div>
+        <div class="val"><span class="k">Turbidity (treated)</span><span><span class="v" id="vTurb">—</span><span class="u">NTU</span></span></div>
+        <div class="val"><span class="k">Consumption today</span><span><span class="v" id="vDaily">—</span><span class="u">m³</span></span></div>
+        <div class="val"><span class="k">Pump cycles today</span><span><span class="v" id="vCycles">—</span></span></div>
+      </div>
+    </div>
+    <div class="pump">
+      <div class="dot stop" id="pumpDot"></div>
+      <div><div class="lbl" id="pumpLbl">Pump stopped</div>
+      <div style="font-size:11px;color:var(--dim)" id="modeLbl">AUTO mode</div></div>
+    </div>
+    <div class="mode-btns">
+      <button class="btn" id="btnAuto">AUTO</button>
+      <button class="btn" id="btnManual">MANUAL</button>
+      <button class="btn" id="btnPumpOn" disabled>Start pump</button>
+      <button class="btn" id="btnPumpOff" disabled>Stop pump</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Setpoints (holding registers)</h2>
+    <div class="setrow"><label>Pump start level (%)</label><input id="sp0" type="number" step="0.5"><button class="btn" onclick="setSP(0)">Set</button></div>
+    <div class="setrow"><label>Pump stop level (%)</label><input id="sp1" type="number" step="0.5"><button class="btn" onclick="setSP(1)">Set</button></div>
+    <div class="setrow"><label>Low pressure alarm (bar)</label><input id="sp2" type="number" step="0.05"><button class="btn" onclick="setSP(2)">Set</button></div>
+    <div class="setrow"><label>High turbidity alarm (NTU)</label><input id="sp3" type="number" step="0.05"><button class="btn" onclick="setSP(3)">Set</button></div>
+    <div class="setrow"><label>Max pump runtime (min)</label><input id="sp4" type="number"><button class="btn" onclick="setSP(4)">Set</button></div>
+    <div class="setrow"><label>Min pump off-time (min)</label><input id="sp5" type="number"><button class="btn" onclick="setSP(5)">Set</button></div>
+    <h2 style="margin-top:16px">Fault injection (demo)</h2>
+    <div class="faultbtns">
+      <button class="btn warn" onclick="fault('leak', 120)">Leak 2 h</button>
+      <button class="btn warn" onclick="fault('pump_failure', 90)">Pump failure 90 min</button>
+      <button class="btn warn" onclick="fault('sensor_freeze', 60)">Frozen sensor 1 h</button>
+    </div>
+    <details>
+      <summary>Raw PLC registers</summary>
+      <table id="regTable"></table>
+    </details>
+  </section>
+
+  <section class="panel" id="alarms">
+    <h2>Alarms <button class="btn" style="float:right;font-size:11px;padding:3px 10px" onclick="cmd({action:'ack_all'})">Ack all</button></h2>
+    <div id="alarmList"><p class="no-alarms">✓ No active alarms</p></div>
+  </section>
+
+  <section class="panel" id="trend-wrap">
+    <h2>Trend — last 4 hours</h2>
+    <canvas id="trend" width="1200" height="260"></canvas>
+    <div class="legend">
+      <span><i style="background:#1f6feb"></i>Tower level %</span>
+      <span><i style="background:#3fb950"></i>Pressure bar ×25</span>
+      <span><i style="background:#d29922"></i>Demand m³/h ×5</span>
+      <span><i style="background:#58a6ff"></i>Pump flow m³/h ×5</span>
+    </div>
+  </section>
+</main>
+
+<script>
+let lastState = null;
+
+async function cmd(body) {
+  const r = await fetch('/api/command', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!j.ok) alert('Command rejected: ' + (j.error || 'unknown'));
+  return j;
+}
+function setSP(reg) {
+  const scale = [10,10,100,1000,1,1][reg];
+  const v = parseFloat(document.getElementById('sp'+reg).value);
+  if (isNaN(v)) return;
+  cmd({action:'set_setpoint', register: reg, value: Math.round(v*scale)});
+}
+function fault(kind, dur) { cmd({action:'inject_fault', kind, duration_minutes: dur}); }
+
+document.querySelectorAll('.speed button').forEach(b =>
+  b.onclick = () => cmd({action:'set_speed', speed: +b.dataset.speed}));
+document.getElementById('btnAuto').onclick   = () => cmd({action:'set_mode', auto:true});
+document.getElementById('btnManual').onclick = () => cmd({action:'set_mode', auto:false});
+document.getElementById('btnPumpOn').onclick  = () => cmd({action:'pump_manual', on:true});
+document.getElementById('btnPumpOff').onclick = () => cmd({action:'pump_manual', on:false});
+
+function render(s) {
+  lastState = s;
+  document.getElementById('clock').textContent = '🕐 ' + s.sim_time.replace('T',' ') + (s.active_faults.length ? '   ⚠ fault: ' + s.active_faults.join(', ') : '');
+  document.getElementById('water').style.height = s.tank_level_pct + '%';
+  document.getElementById('lvlPct').textContent = s.tank_level_pct.toFixed(0) + '%';
+  const hr = s.registers.HR;
+  document.getElementById('markStart').style.bottom = (hr[0]/10) + '%';
+  document.getElementById('markStart').textContent = 'start ' + (hr[0]/10) + '%';
+  document.getElementById('markStop').style.bottom = (hr[1]/10) + '%';
+  document.getElementById('markStop').textContent = 'stop ' + (hr[1]/10) + '%';
+  document.getElementById('vLvl').textContent  = s.tank_level_m3.toFixed(1);
+  document.getElementById('vPres').textContent = s.pressure_bar.toFixed(2);
+  document.getElementById('vFlow').textContent = s.consumption_m3h.toFixed(1);
+  document.getElementById('vPumpFlow').textContent = s.pump_flow_m3h.toFixed(1);
+  document.getElementById('vTurb').textContent = s.turbidity_clean_ntu.toFixed(2);
+  document.getElementById('vDaily').textContent = s.daily_consumption_m3.toFixed(1);
+  document.getElementById('vCycles').textContent = s.pump_cycles_today;
+
+  const dot = document.getElementById('pumpDot'), lbl = document.getElementById('pumpLbl');
+  const pumpFault = s.alarms.find(a => a.id==='PUMP_FAULT' && a.active);
+  dot.className = 'dot ' + (pumpFault ? 'fault' : s.pump_running ? 'run' : 'stop');
+  lbl.textContent = pumpFault ? 'PUMP FAULT' : s.pump_running ? 'Pump running' : 'Pump stopped';
+  document.getElementById('modeLbl').textContent = s.auto_mode ? 'AUTO mode — PLC hysteresis control' : 'MANUAL mode — operator control';
+  document.getElementById('btnAuto').classList.toggle('on', s.auto_mode);
+  document.getElementById('btnManual').classList.toggle('on', !s.auto_mode);
+  document.getElementById('btnPumpOn').disabled = s.auto_mode || s.pump_running;
+  document.getElementById('btnPumpOff').disabled = s.auto_mode || !s.pump_running;
+
+  document.querySelectorAll('.speed button').forEach(b =>
+    b.classList.toggle('on', +b.dataset.speed === s.speed));
+
+  const spFmt = [v=>(v/10), v=>(v/10), v=>(v/100), v=>(v/1000), v=>v, v=>v];
+  [0,1,2,3,4,5].forEach(r => {
+    const el = document.getElementById('sp'+r);
+    if (document.activeElement !== el) el.value = spFmt[r](hr[r]);
+  });
+
+  const active = s.alarms.filter(a => a.active);
+  const list = document.getElementById('alarmList');
+  if (!active.length) { list.innerHTML = '<p class="no-alarms">✓ No active alarms</p>'; }
+  else list.innerHTML = active.map(a =>
+    `<div class="alarm ${a.severity} ${a.acknowledged?'acked':''}">
+       <span class="sev">${a.severity}</span><span>${a.text}</span>
+       ${a.acknowledged ? '<span style="margin-left:auto;font-size:11px">acknowledged</span>'
+                        : `<button class="btn ack" onclick="cmd({action:'ack_alarm', id:'${a.id}'})">Ack</button>`}
+     </div>`).join('');
+
+  const regNames = {IR:['Tank % x10','Tank m3 x100','Pressure x100','Demand x100','Pump flow x100','Turb clean x1000','Turb raw x1000'],
+                    HR:['Start lvl','Stop lvl','Low press alm','High turb alm','Max runtime','Min off-time'],
+                    C:['Auto mode','Manual pump'], D:['Pump running','Pump fault','Sensor fault','Interlock']};
+  let rows = '';
+  for (const [bank, regs] of Object.entries(s.registers))
+    for (const [addr, val] of Object.entries(regs))
+      rows += `<tr><td>${bank}${addr}</td><td>${regNames[bank][addr]||''}</td><td>${val}</td></tr>`;
+  document.getElementById('regTable').innerHTML = '<tr><th>Register</th><th>Meaning</th><th>Value</th></tr>' + rows;
+}
+
+async function drawTrend() {
+  const r = await fetch('/api/history?points=240');
+  const {samples} = await r.json();
+  if (!samples || samples.length < 2) return;
+  const cv = document.getElementById('trend'), ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, n = samples.length;
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle = '#2d333b'; ctx.lineWidth = 1;
+  for (let g=0; g<=4; g++) { ctx.beginPath(); ctx.moveTo(0, H*g/4); ctx.lineTo(W, H*g/4); ctx.stroke(); }
+  const series = [
+    {f: s => s.tank_level_pct,        color:'#1f6feb'},
+    {f: s => s.pressure_bar * 25,     color:'#3fb950'},
+    {f: s => s.consumption_m3h * 5,   color:'#d29922'},
+    {f: s => s.pump_flow_m3h * 5,     color:'#58a6ff'},
+  ];
+  for (const se of series) {
+    ctx.strokeStyle = se.color; ctx.lineWidth = 1.6; ctx.beginPath();
+    samples.forEach((s,i) => {
+      const x = i/(n-1)*W, y = H - Math.min(100, se.f(s))/100*H;
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+    });
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#8b949e'; ctx.font = '11px ui-monospace, monospace';
+  ctx.fillText(samples[0].sim_time.replace('T',' '), 6, H-6);
+  const t = samples[n-1].sim_time.replace('T',' ');
+  ctx.fillText(t, W - ctx.measureText(t).width - 6, H-6);
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state');
+    render(await r.json());
+  } catch (e) { /* server restarting */ }
+}
+setInterval(poll, 1000);
+setInterval(drawTrend, 5000);
+poll(); drawTrend();
+</script>
+</body>
+</html>
