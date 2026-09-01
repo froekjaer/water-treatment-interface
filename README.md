@@ -61,3 +61,7 @@ writes `docs/sample_24h.csv` plus a summary to stdout.
 
 Real waterworks are critical infrastructure (NIS2 etc.). The emulator is a
 risk-free sandbox — nothing here touches a real installation.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
