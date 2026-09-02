@@ -41,6 +41,13 @@ emulator/        Physics core + control layer
   hmi_server.py  HMI backend: runs physics+PLC at accelerated time,
                  serves JSON API + the HMI page (pure stdlib)
   demo_24h.py    Runs a simulated day and writes CSV + summary
+edge/
+  edge_agent.py  Simulated on-site gateway: polls the PLC, buffers samples
+                 in a local SQLite outbox (store-and-forward), uploads
+                 batches to the headend with HMAC-signed requests
+headend/
+  ingest_server.py  Minimal headend: authenticates (HMAC + replay window),
+                 stores samples in SQLite, shows a per-plant status page
 hmi/
   static/
     index.html   The HMI page: live gauges, pump control, setpoints,
@@ -50,25 +57,23 @@ docs/            Design documents and simulation reports
 
 ## Getting started
 
-**HMI (recommended):**
+**The full chain (PLC → Edge → Headend), three terminals:**
 
 ```bash
-python emulator/hmi_server.py          # then open http://localhost:8080
-python emulator/hmi_server.py --speed 60   # faster: one day in 24 min
+python emulator/hmi_server.py          # 1: the plant (HMI on :8080)
+python headend/ingest_server.py        # 2: the headend (status on :9090)
+python edge/edge_agent.py              # 3: the edge agent (links them)
 ```
 
-The HMI shows the plant live: tower level, pressure, demand, turbidity,
-pump control (AUTO/MANUAL), setpoints, alarms — and fault injection buttons
-(leak, pump failure, frozen sensor) for demos and testing.
+Then open:
+- **http://localhost:8080** — the HMI: live process view, pump control,
+  setpoints, alarms, trend chart, fault injection buttons
+- **http://localhost:9090** — the headend status page: what the central
+  system has actually received (auto-refreshes)
 
-**Batch demo:**
-
-```bash
-python emulator/demo_24h.py
-```
-
-Runs a simulated day (1-minute samples) on a typical small plant and
-writes `docs/sample_24h.csv` plus a summary to stdout.
+Try killing the headend (Ctrl+C in terminal 2) while the others run:
+the Edge agent keeps every sample in its outbox and flushes the backlog
+when the headend returns — exactly like the real store-and-forward design.
 
 ## The PLC layer
 
@@ -86,10 +91,11 @@ runs its own sensor diagnostics (frozen-sensor detection).
 1. ✅ Emulator: physics core with pump, tower, pressure, demand, turbidity and fault scenarios
 2. ✅ PLC emulator: scan cycle, register map, interlocks, alarms, AUTO/MANUAL
 3. ✅ HMI: web UI with live process view, setpoints, alarms, trend, fault injection
-4. ⬜ Emulator: simulated Edge agent posting telemetry to the headend
-5. ⬜ Headend: ingest endpoints + time-series model (patterned after captures)
-6. ⬜ UI: plant overview, trend charts, alarm panel (reuses Navbar/auth/GRC)
-7. ⬜ Alarm and threshold engine on top of the existing notification setup
+4. ✅ Simulated Edge agent: PLC polling, store-and-forward outbox, HMAC-signed upload
+5. ✅ Minimal headend stand-in: authenticated ingest, SQLite storage, status page
+6. ⬜ Real headend: grow ingest into the timelapse-derived backend (time-series model, auth, users)
+7. ⬜ UI: plant overview, trend charts, alarm panel (reuses Navbar/auth/GRC)
+8. ⬜ Alarm and threshold engine on top of the existing notification setup
 
 ## Note
 
