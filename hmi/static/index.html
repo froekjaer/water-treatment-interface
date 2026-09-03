@@ -79,6 +79,27 @@
   table { width: 100%; border-collapse: collapse; font: 11px ui-monospace, monospace; margin-top: 8px; }
   td, th { border: 1px solid var(--border); padding: 3px 7px; text-align: left; }
   th { color: var(--dim); }
+
+  /* PLC ladder monitor */
+  #ladder-wrap { grid-column: 1 / -1; }
+  .ladder { background: #0a0e14; border: 1px solid var(--border); border-radius: 8px; padding: 4px 0 8px; font: 12px ui-monospace, monospace; overflow-x: auto; }
+  .rungw { padding-top: 6px; }
+  .rc { font-size: 10px; color: var(--dim); padding: 0 0 2px 46px; }
+  .rungrow { display: flex; align-items: stretch; }
+  .rungnum { flex: 0 0 30px; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 10px; }
+  .rail { flex: 0 0 3px; background: #444c56; }
+  .rung-body { flex: 1; display: flex; align-items: center; padding: 8px 4px; }
+  .el { display: flex; flex-direction: column; align-items: center; min-width: 92px; flex: 0 0 auto; }
+  .el .nm { font-size: 10px; color: var(--dim); white-space: nowrap; }
+  .el .sy { font-size: 15px; color: #555; letter-spacing: 1px; }
+  .el .vl { font-size: 9px; color: var(--dim); min-height: 11px; white-space: nowrap; }
+  .el.on .nm { color: var(--ok); }
+  .el.on .sy { color: var(--ok); text-shadow: 0 0 9px rgba(63,185,80,.8); }
+  .conn { flex: 1 1 8px; min-width: 6px; height: 2px; background: #3a4048; align-self: center; }
+  .conn.on { background: var(--ok); box-shadow: 0 0 6px rgba(63,185,80,.6); }
+  .branch { display: flex; flex-direction: column; justify-content: space-around; align-self: stretch; border-left: 2px solid #444c56; border-right: 2px solid #444c56; padding: 2px 0; flex: 0 0 auto; }
+  .bpath { display: flex; align-items: center; padding: 3px 6px; }
+  .lad-legend { font-size: 11px; color: var(--dim); margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -151,6 +172,12 @@
   <section class="panel" id="alarms">
     <h2>Alarms <button class="btn" style="float:right;font-size:11px;padding:3px 10px" onclick="cmd({action:'ack_all'})">Ack all</button></h2>
     <div id="alarmList"><p class="no-alarms">✓ No active alarms</p></div>
+  </section>
+
+  <section class="panel" id="ladder-wrap">
+    <h2>PLC Ladder Logic — live (program: PUMP_CONTROL)</h2>
+    <div class="ladder" id="ladder"><p style="padding:10px;color:var(--dim)">Waiting for first PLC scan…</p></div>
+    <div class="lad-legend">🟢 green = conducting (power flow) · NC contacts <span style="font-family:ui-monospace,monospace">-|/|-</span> conduct when their condition is FALSE · interlocks always win</div>
   </section>
 
   <section class="panel" id="trend-wrap">
@@ -281,9 +308,54 @@ async function poll() {
     render(await r.json());
   } catch (e) { /* server restarting */ }
 }
+async function pollLadder() {
+  try {
+    const r = await fetch('/api/ladder');
+    renderLadder(await r.json());
+  } catch (e) { /* server restarting */ }
+}
+
+function renderLadder(d) {
+  const root = document.getElementById('ladder');
+  if (!d || !d.rungs || !d.rungs.length) {
+    root.innerHTML = '<p style="padding:10px;color:var(--dim)">Waiting for first PLC scan…</p>';
+    return;
+  }
+  const elHtml = e => {
+    const sym = e.kind === 'nc' ? '-|/|-' : '-| |-';
+    return `<div class="el ${e.on ? 'on' : ''}"><span class="nm">${e.name}</span><span class="sy">${sym}</span><span class="vl">${e.value || ''}</span></div>`;
+  };
+  const coilHtml = e =>
+    `<div class="el ${e.on ? 'on' : ''}"><span class="nm">${e.name}</span><span class="sy">-( )-</span><span class="vl">${e.value || ''}</span></div>`;
+  const conn = on => `<div class="conn ${on ? 'on' : ''}"></div>`;
+  root.innerHTML = d.rungs.map(r => {
+    let body = '';
+    if (r.branch) {
+      const anyOn = r.branch.some(p => p.every(e => e.on));
+      body += conn(true);
+      body += `<div class="branch">` + r.branch.map(p =>
+        `<div class="bpath">${p.map(e => elHtml(e)).join('')}</div>`).join('') + `</div>`;
+      body += conn(anyOn);
+      body += coilHtml(r.coil);
+    } else {
+      body += conn(true);
+      r.elements.forEach((e, i) => {
+        if (i) body += conn(r.elements[i - 1].on);
+        body += elHtml(e);
+      });
+      body += conn(r.coil.on);
+      body += coilHtml(r.coil);
+    }
+    return `<div class="rungw"><div class="rc">#${r.n} — ${r.comment}</div>` +
+           `<div class="rungrow"><div class="rungnum">${r.n}</div><div class="rail"></div>` +
+           `<div class="rung-body">${body}</div><div class="rail"></div></div></div>`;
+  }).join('');
+}
+
 setInterval(poll, 1000);
+setInterval(pollLadder, 1000);
 setInterval(drawTrend, 5000);
-poll(); drawTrend();
+poll(); pollLadder(); drawTrend();
 </script>
 </body>
 </html>

@@ -54,7 +54,8 @@ headend/
 hmi/
   static/
     index.html   The HMI page: live gauges, pump control, setpoints,
-                 alarms with acknowledge, trend chart, fault injection
+                 alarms with acknowledge, trend chart, fault injection,
+                 and a live PLC ladder monitor (power-flow highlighting)
 docs/            Design documents and simulation reports
 ```
 

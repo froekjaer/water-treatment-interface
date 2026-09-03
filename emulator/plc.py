@@ -89,6 +89,7 @@ class PLC:
         self._interlock_active = False
         self._low_pressure_scans = 0
         self._tank_readings: list[float] = []
+        self._lad: dict = {}             # live ladder-monitor state (set by scan)
 
         self.alarms: dict[str, Alarm] = {
             "LOW_PRESSURE":   Alarm("LOW_PRESSURE",   "Network pressure below setpoint",        "critical"),
@@ -179,9 +180,10 @@ class PLC:
         # ── 2. EXECUTE LOGIC ──────────────────────────────────────────────
 
         # -- control strategy ------------------------------------------------
+        prev_cmd = self.pump_command
+        start_pct = self.hr[0] / 10.0
+        stop_pct = self.hr[1] / 10.0
         if self.auto_mode:
-            start_pct = self.hr[0] / 10.0
-            stop_pct = self.hr[1] / 10.0
             if not self.pump_command and level_pct < start_pct:
                 want_pump = True
             elif self.pump_command and level_pct > stop_pct:
@@ -191,14 +193,22 @@ class PLC:
         else:
             want_pump = self.manual_pump_command
 
+        m_start = self.auto_mode and not prev_cmd and level_pct < start_pct
+        m_keep = self.auto_mode and prev_cmd and level_pct <= stop_pct
+        m_man = (not self.auto_mode) and self.manual_pump_command
+
         # -- interlocks (always win over the strategy) -----------------------
         self._interlock_active = False
+        minoff_trip = False
+        maxrun_trip = False
         if want_pump:
             if self._pump_off_minutes < self.hr[5] and not self.pump_command:
                 want_pump = False                    # min off-time
+                minoff_trip = True
                 self._interlock_active = True
             elif self._pump_on_minutes >= self.hr[4]:
                 want_pump = False                    # max continuous runtime
+                maxrun_trip = True
                 self._interlock_active = True
 
         # -- timers -----------------------------------------------------------
@@ -210,6 +220,29 @@ class PLC:
             self._pump_on_minutes = 0
 
         self.pump_command = want_pump
+
+        # -- live ladder-monitor state (rendered by the HMI PLC view) --------
+        self._lad = {
+            "auto": self.auto_mode,
+            "manual_cmd": self.manual_pump_command,
+            "level_pct": level_pct,
+            "start_pct": start_pct,
+            "stop_pct": stop_pct,
+            "below_start": level_pct < start_pct,
+            "above_stop": level_pct > stop_pct,
+            "prev_cmd": prev_cmd,
+            "m_start": m_start,
+            "m_keep": m_keep,
+            "m_man": m_man,
+            "m_req": m_start or m_keep or m_man,
+            "maxrun_trip": maxrun_trip,
+            "minoff_trip": minoff_trip,
+            "on_min": self._pump_on_minutes,
+            "off_min": self._pump_off_minutes,
+            "maxrun_sp": self.hr[4],
+            "minoff_sp": self.hr[5],
+            "out": self.pump_command,
+        }
 
         # -- alarm evaluation --------------------------------------------------
         if pressure_bar < self.hr[2] / 100.0:
@@ -248,3 +281,70 @@ class PLC:
             }
             for a in self.alarms.values()
         ]
+
+    def ladder(self) -> dict:
+        """Live ladder-logic view for the HMI PLC monitor.
+
+        Returns the rung structure (mirroring the logic in scan()) with the
+        live conducting state of every contact and coil, so the HMI can render
+        power flow like the online view of a real PLC programming tool.
+        For NC contacts, 'on' means power flows through (condition false).
+        """
+        if not self._lad:
+            return {"rungs": []}
+        L = self._lad
+
+        def c(name: str, on: bool, value: str = "") -> dict:
+            return {"kind": "no", "name": name, "on": bool(on), "value": value}
+
+        def nc(name: str, on: bool, value: str = "") -> dict:
+            return {"kind": "nc", "name": name, "on": bool(on), "value": value}
+
+        def coil(name: str, on: bool, value: str = "") -> dict:
+            return {"name": name, "on": bool(on), "value": value}
+
+        return {
+            "program": "PUMP_CONTROL",
+            "rungs": [
+                {"n": 1, "comment": "AUTO: start request when level < start setpoint",
+                 "elements": [
+                     c("AUTO", L["auto"]),
+                     c("Lvl<Start", L["below_start"],
+                       f"{L['level_pct']:.1f}% < {L['start_pct']:.1f}%"),
+                     nc("PumpCmd", not L["prev_cmd"],
+                        "pump stopped" if not L["prev_cmd"] else "pump running"),
+                 ],
+                 "coil": coil("M_START", L["m_start"], "start request")},
+                {"n": 2, "comment": "AUTO: seal-in — keep running until stop level",
+                 "elements": [
+                     c("AUTO", L["auto"]),
+                     c("PumpCmd", L["prev_cmd"]),
+                     nc("Lvl>Stop", not L["above_stop"],
+                        f"{L['level_pct']:.1f}% > {L['stop_pct']:.1f}%"),
+                 ],
+                 "coil": coil("M_KEEP", L["m_keep"], "keep running")},
+                {"n": 3, "comment": "MANUAL: operator pump command",
+                 "elements": [
+                     nc("AUTO", not L["auto"],
+                        "AUTO" if L["auto"] else "MANUAL"),
+                     c("ManualCmd", L["manual_cmd"]),
+                 ],
+                 "coil": coil("M_MAN", L["m_man"], "manual request")},
+                {"n": 4, "comment": "Pump request = start OR keep OR manual",
+                 "branch": [
+                     [c("M_START", L["m_start"])],
+                     [c("M_KEEP", L["m_keep"])],
+                     [c("M_MAN", L["m_man"])],
+                 ],
+                 "coil": coil("M_REQ", L["m_req"], "pump request")},
+                {"n": 5, "comment": "Interlocks always win: max runtime + short-cycle protection",
+                 "elements": [
+                     c("M_REQ", L["m_req"]),
+                     nc("MaxRun", not L["maxrun_trip"],
+                        f"on {L['on_min']}/{L['maxrun_sp']} min"),
+                     nc("MinOff", not L["minoff_trip"],
+                        f"off {L['off_min']}/{L['minoff_sp']} min"),
+                 ],
+                 "coil": coil("Q0 PumpCmd", L["out"], "physical output")},
+            ],
+        }

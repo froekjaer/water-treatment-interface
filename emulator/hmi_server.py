@@ -157,6 +157,9 @@ class HmiHandler(BaseHTTPRequestHandler):
             with self.plant.lock:
                 data = list(self.plant.history)[-points:]
             self._json({"samples": data})
+        elif url.path == "/api/ladder":
+            with self.plant.lock:
+                self._json(self.plant.plc.ladder())
         elif url.path == "/" or url.path == "/index.html":
             self._static("index.html", "text/html; charset=utf-8")
         else:
