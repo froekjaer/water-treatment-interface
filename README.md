@@ -40,10 +40,16 @@ start_all.py     One-command startup: launches HMI + headend + edge agent
 emulator/        Physics core + control layer
   waterworks.py  The physics model (pump, tower, pressure, demand, quality, faults)
   plc.py         PLC emulator: scan cycle, Modbus-style register map,
-                 interlocks, alarm evaluation, AUTO/MANUAL control
+                 interlocks, alarm evaluation, AUTO/MANUAL control,
+                 live ladder-monitor state for the HMI
   hmi_server.py  HMI backend: runs physics+PLC at accelerated time,
                  serves JSON API + the HMI page (pure stdlib)
+  modbus_bridge.py  Virtual field device: physics exposed as a Modbus TCP
+                 server (FC 1-6), so a real PLC runtime (OpenPLC) can take
+                 over the control — see openplc/
   demo_24h.py    Runs a simulated day and writes CSV + summary
+openplc/         OpenPLC integration: docker-compose for Runtime v4,
+                 starter program (pump_control.st) and macOS setup guide
 edge/
   edge_agent.py  Simulated on-site gateway: polls the PLC, buffers samples
                  in a local SQLite outbox (store-and-forward), uploads
@@ -99,6 +105,13 @@ discrete inputs), so the HMI — and later the Edge agent — addresses the
 plant the way a real SCADA system would. Interlocks (max runtime,
 short-cycle protection) always win over the control strategy, and the PLC
 runs its own sensor diagnostics (frozen-sensor detection).
+
+## OpenPLC: swap the Python PLC for a real PLC runtime
+
+Want to edit the control logic yourself — in a real IEC 61131-3 ladder
+editor? See [`openplc/`](openplc/): the physics becomes a Modbus TCP field
+device, OpenPLC Runtime v4 (Docker, macOS-friendly) runs **your** ladder
+program, and the free OpenPLC Editor is where you write it.
 
 ## Roadmap
 

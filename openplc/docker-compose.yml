@@ -1,0 +1,34 @@
+# OpenPLC Runtime v4 — the "real PLC" for the waterworks emulator.
+#
+# The runtime is headless: the OpenPLC Editor (on your Mac) connects to it
+# over HTTPS on port 8443 to upload programs, start/stop the PLC and debug
+# variables live. There is intentionally no web UI on 8080 (that was v3).
+#
+# Usage:  docker compose up -d
+#         docker logs -f openplc-runtime
+#         docker compose down
+#
+# Image is multi-arch (linux/amd64 + linux/arm64) — works on both Intel
+# and Apple Silicon Macs via Docker Desktop or OrbStack.
+
+services:
+  openplc-runtime:
+    image: ghcr.io/autonomy-logic/openplc-runtime:latest
+    container_name: openplc-runtime
+    cap_add:
+      - SYS_NICE        # real-time scheduling (SCHED_FIFO)
+      - SYS_RESOURCE
+    ports:
+      - "8443:8443"     # HTTPS REST API — the Editor connects here
+    volumes:
+      - openplc-runtime-data:/var/run/runtime   # uploaded programs persist
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8443/api/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  openplc-runtime-data:
