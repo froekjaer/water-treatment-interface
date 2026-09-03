@@ -6,9 +6,9 @@ serves a small JSON API plus a static HMI page. Pure standard library —
 no dependencies, runs anywhere Python runs.
 
 Usage:
-    python emulator/hmi_server.py [--port 8080] [--speed 5]
+    python emulator/hmi_server.py [--port 8090] [--speed 5]
 
-Then open http://localhost:8080 in a browser.
+Then open http://localhost:8090 in a browser.
 
 Speed is simulated minutes per real second (default 5 → one day in ~5 hours;
 use 60 for a day in 24 minutes, 1440 for a day in 1 minute).
@@ -186,7 +186,7 @@ class HmiHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def serve(port: int = 8080, speed: int = 5) -> None:
+def serve(port: int = 8090, speed: int = 5) -> None:
     plant = Plant(speed=speed)
     with plant.lock:
         plant.step_once()  # prime first state
@@ -204,7 +204,7 @@ def serve(port: int = 8080, speed: int = 5) -> None:
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Waterworks HMI server")
-    p.add_argument("--port", type=int, default=8080)
+    p.add_argument("--port", type=int, default=8090)
     p.add_argument("--speed", type=int, default=5,
                    help="simulated minutes per real second (1-1440)")
     args = p.parse_args()

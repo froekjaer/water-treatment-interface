@@ -18,7 +18,7 @@ Behaviour modelled after the real thing:
 
 Usage:
     python edge/edge_agent.py \
-        --plc http://localhost:8080 \
+        --plc http://localhost:8090 \
         --headend http://localhost:9090 \
         --edge-id EDGE-PLANT-01 --secret dev-secret-change-me
 """
@@ -186,7 +186,7 @@ class EdgeAgent:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Waterworks Edge agent (simulated)")
-    p.add_argument("--plc", default="http://localhost:8080",
+    p.add_argument("--plc", default="http://localhost:8090",
                    help="Base URL of the plant PLC/HMI")
     p.add_argument("--headend", default="http://localhost:9090",
                    help="Base URL of the headend ingest server")

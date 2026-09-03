@@ -60,13 +60,13 @@ docs/            Design documents and simulation reports
 **The full chain (PLC → Edge → Headend), three terminals:**
 
 ```bash
-python emulator/hmi_server.py          # 1: the plant (HMI on :8080)
+python emulator/hmi_server.py          # 1: the plant (HMI on :8090)
 python headend/ingest_server.py        # 2: the headend (status on :9090)
 python edge/edge_agent.py              # 3: the edge agent (links them)
 ```
 
 Then open:
-- **http://localhost:8080** — the HMI: live process view, pump control,
+- **http://localhost:8090** — the HMI: live process view, pump control,
   setpoints, alarms, trend chart, fault injection buttons
 - **http://localhost:9090** — the headend status page: what the central
   system has actually received (auto-refreshes)
