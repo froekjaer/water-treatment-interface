@@ -34,6 +34,9 @@ repository are written in English.**
 ## Repository layout (under construction)
 
 ```
+start_all.py     One-command startup: launches HMI + headend + edge agent
+                 as child processes with merged, colour-coded logs;
+                 Ctrl+C (or SIGTERM) stops everything cleanly
 emulator/        Physics core + control layer
   waterworks.py  The physics model (pump, tower, pressure, demand, quality, faults)
   plc.py         PLC emulator: scan cycle, Modbus-style register map,
@@ -57,7 +60,17 @@ docs/            Design documents and simulation reports
 
 ## Getting started
 
-**The full chain (PLC → Edge → Headend), three terminals:**
+**One command (recommended):**
+
+```bash
+python start_all.py                 # full chain, 5x speed
+python start_all.py --speed 60      # one simulated day in 24 minutes
+```
+
+This starts the plant (HMI), the headend and the edge agent together and
+merges their logs with coloured prefixes. Ctrl+C stops everything cleanly.
+
+**Or run the full chain (PLC → Edge → Headend) in three terminals:**
 
 ```bash
 python emulator/hmi_server.py          # 1: the plant (HMI on :8090)
